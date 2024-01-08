@@ -1,42 +1,11 @@
 class DeadLinkChecker {
   // Variables
-  #allLinks = Array.from(
-    document.querySelector("#bodyContent").querySelectorAll(".external")
+  #externalLinksElements = Array.from(
+    document.querySelector("#bodyContent").querySelectorAll(".external.text")
   );
-
-  #wmfLinks = [
-    "^https?:\\/\\/[\\w-]+\\.wikipedia\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikimedia\\.(org|ch|at|de)",
-    "^https?:\\/\\/toolserver\\.org",
-    "^https?:\\/\\/creativecommons\\.org",
-    "^https?:\\/\\/www\\.gnu\\.org",
-    "^https?:\\/\\/wikimediafoundation\\.org",
-    "^https?:\\/\\/wikimedia\\.de",
-    "^https?:\\/\\/([\\w-.]+)?wikiquote\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikisource\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikiversity\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wiktionary\\.org",
-    "^https?:\\/\\/([\\w-.]+)?mediawiki\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikinews\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikibooks\\.org",
-    "^https?:\\/\\/tools\\.wmflabs\\.org",
-    "^https?:\\/\\/([\\w-.]+)?toolforge\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikitravel\\.org",
-    "^https?:\\/\\/([\\w-.]+)?wikidata\\.org",
-    "^https?:\\/\\/secure.wikimedia\\.org",
-  ];
-  #externalLinks = this.#allLinks
-    .filter((elt) => !this.#isWmfLink(elt.href))
-    .map((elt) => elt.href);
+  #externalLinks = this.#externalLinksElements.map((elt) => elt.href);
 
   // Methods
-  #isWmfLink(url) {
-    // Accepts a url and checks if url matches any of Wikimedia's domain names
-    const isMatch = this.#wmfLinks.some((pattern) =>
-      new RegExp(pattern).test(url)
-    );
-    return isMatch;
-  }
 
   async #sendLinks(url = "", data) {
     // function to post links to the python server
@@ -50,34 +19,82 @@ class DeadLinkChecker {
     return response.json();
   }
 
-  findDeadLinks() {
+  #mountResultsDiv(innerhtml) {
+    //Mounts a results dive to the bottom right of the page
+    const resultsDiv = document.createElement("div");
+    resultsDiv.id = "results-div";
+    resultsDiv.innerHTML = `${innerhtml}`;
+    resultsDiv.style.position = "absolute";
+    resultsDiv.style.position = "fixed";
+    resultsDiv.style.bottom = "0px";
+    resultsDiv.style.right = "0px";
+
+    document.getElementById("bodyContent").appendChild(resultsDiv);
+  }
+
+  #splitLinksIntoBatches(arr, batchSize) {
+    // splits an array into batches not greater than the batchSize
+    let batches = [];
+    for (let i = 0; i < arr.length; i += batchSize) {
+      batches.push(arr.slice(i, i + batchSize));
+    }
+    return batches;
+  }
+
+  #processServerdata(item) {
+    const position = this.#externalLinks.indexOf(item.link);
+    const linkElement =
+      document.getElementsByClassName("external text")[position];
+    linkElement.insertAdjacentHTML(
+      "afterend",
+      `<span style="color:red">${item.status_code}</span>`
+    );
+  }
+
+  async findDeadLinks() {
     if (this.#externalLinks.length > 0) {
-      this.#sendLinks(
-        "https://deadlinkchecker.toolforge.org/checklinks",
-        this.#externalLinks
-      ).then((data) => {
-        data.forEach((item) => {
-          if (item.status_code != 200) {
-            //get the item's position
-            const position = this.#allLinks.findIndex(
-              (elt) => elt.href == item.link
-            );
-            const status =
-              document.getElementsByClassName("external")[position];
-            status.insertAdjacentHTML(
-              "afterend",
-              `<span style="color:red">${item.status_code}</span>`
-            );
+      const batchSize = 10;
+      const externalLinksSize = this.#externalLinks.length;
+
+      if (externalLinksSize > batchSize) {
+        // split the links into batches of not more that 15 links and send each batch to the python server
+        let batches = this.#splitLinksIntoBatches(
+          this.#externalLinks,
+          batchSize
+        );
+
+        let count = 0;
+        for (let i = 0; i < batches.length; i++) {
+          console.log(`batch ${i}`, batches[i]);
+          const data = await this.#sendLinks(
+            "https://deadlinkchecker.toolforge.org/checklinks",
+            batches[i]
+          );
+          if (data) {
+            console.log(`batch ${i}`, data);
+            data.forEach((item) => {
+              this.#processServerdata(item);
+            });
           }
-        });
-      });
-    } else {
-      //Display on the page that the page is okay
-      $("#bodyContent").prepend("<p>Page is OK!</p>");
+          count += data.length;
+          console.log(count);
+        }
+      } else {
+        const data = await this.#sendLinks(
+          "https://deadlinkchecker.toolforge.org/checklinks",
+          this.#externalLinks
+        );
+        if (data) {
+          data.forEach((item) => {
+            this.#processServerdata(item);
+          });
+        }
+      }
     }
   }
 }
 
-// TODO start to find the links, once the page is loaded
+//start to find the links, once the page is loaded
 const deadLinkChecker = new DeadLinkChecker();
 deadLinkChecker.findDeadLinks();
+
